@@ -1,0 +1,28 @@
+name: Build and Sign Image
+
+on:
+  push:
+    branches: [main]
+
+jobs:
+  build-sign:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v3
+
+      - name: Login to registry
+        run: echo "${{ secrets.REGISTRY_PASSWORD }}" | docker login -u ${{ secrets.REGISTRY_USER }} --password-stdin
+
+      - name: Build image
+        run: docker build -t ${{ secrets.IMAGE_NAME }} ./app
+
+      - name: Push image
+        run: docker push ${{ secrets.IMAGE_NAME }}
+
+      - name: Install cosign
+        uses: sigstore/cosign-installer@v3
+
+      - name: Sign image
+        run: cosign sign --key ${{ secrets.COSIGN_KEY }} ${{ secrets.IMAGE_NAME }}
