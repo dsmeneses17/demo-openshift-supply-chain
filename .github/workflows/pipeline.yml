@@ -3,6 +3,7 @@ name: Supply Chain Pipeline
 on:
   push:
     branches: [main]
+  workflow_dispatch:
 
 jobs:
   build-sign-attest-validate:
@@ -69,12 +70,10 @@ jobs:
         run: |
           cosign attest --predicate provenance.json --type slsaprovenance ${{ steps.digest.outputs.digest }}
 
-      # 🔍 Instalar ec CLI
       - name: Install ec
         run: |
           Invoke-WebRequest -Uri https://github.com/enterprise-contract/ec-cli/releases/latest/download/ec_windows_amd64.exe -OutFile ec.exe
 
-      # 🔍 Validar imagen (🔥 clave)
       - name: Validate image
         run: |
           .\ec.exe validate image --image ${{ steps.digest.outputs.digest }}
