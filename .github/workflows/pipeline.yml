@@ -6,7 +6,7 @@ on:
 
 jobs:
   build-sign-attest-validate:
-    runs-on: [self-hosted, windows, crc]
+    runs-on: [self-hosted]
     permissions:
       contents: read
       packages: write
