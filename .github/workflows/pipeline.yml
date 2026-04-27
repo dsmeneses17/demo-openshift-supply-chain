@@ -1,28 +1,99 @@
-name: Build and Sign Image
+name: Supply Chain Pipeline
 
 on:
   push:
     branches: [main]
 
 jobs:
-  build-sign:
-    runs-on: ubuntu-latest
-
+  build-sign-attest-validate:
+    runs-on: [self-hosted, windows, crc]
+    permissions:
+      contents: read
+      packages: write
+      id-token: write 
     steps:
       - name: Checkout
         uses: actions/checkout@v3
 
-      - name: Login to registry
-        run: echo "${{ secrets.REGISTRY_PASSWORD }}" | docker login -u ${{ secrets.REGISTRY_USER }} --password-stdin
+
+      - name: Login to GHCR
+        run: echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u ${{ github.actor }} --password-stdin
+
 
       - name: Build image
-        run: docker build -t ${{ secrets.IMAGE_NAME }} ./app
+        run: docker build -t ghcr.io/${{ github.repository }}:latest ./app
+
 
       - name: Push image
-        run: docker push ${{ secrets.IMAGE_NAME }}
+        run: docker push ghcr.io/${{ github.repository }}:latest
+
+      - name: Get digest
+        id: digest
+        run: |
+          $digest = docker inspect --format='{{index .RepoDigests 0}}' ghcr.io/${{ github.repository }}:latest
+          "digest=$digest" >> $env:GITHUB_OUTPUT
 
       - name: Install cosign
         uses: sigstore/cosign-installer@v3
 
       - name: Sign image
-        run: cosign sign --key ${{ secrets.COSIGN_KEY }} ${{ secrets.IMAGE_NAME }}
+        run: cosign sign --yes ${{ steps.digest.outputs.digest }}
+        
+      - name: Generate provenance
+        id: provenance
+        run: |
+          $fullDigest = "${{ steps.digest.outputs.digest }}"
+          $sha = ($fullDigest -split "@sha256:")[1]
+
+          $provenance = @{
+            _type = "https://in-toto.io/Statement/v0.1"
+            predicateType = "https://slsa.dev/provenance/v0.2"
+            subject = @(
+              @{
+                name = "ghcr.io/${{ github.repository }}:latest"
+                digest = @{ sha256 = $sha }
+              }
+            )
+            predicate = @{
+              buildType = "github-actions"
+              builder = @{ id = "${{ github.actor }}" }
+            }
+          }
+
+          $provenance | ConvertTo-Json -Depth 8 | Out-File -FilePath provenance.json -Encoding utf8
+
+          "digest=$fullDigest" >> $env:GITHUB_OUTPUT
+          "sha=$sha" >> $env:GITHUB_OUTPUT
+
+      - name: Attest image
+        run: |
+          cosign attest --predicate provenance.json --type slsaprovenance ${{ steps.digest.outputs.digest }}
+
+      # 🔍 Instalar ec CLI
+      - name: Install ec
+        run: |
+          Invoke-WebRequest -Uri https://github.com/enterprise-contract/ec-cli/releases/latest/download/ec_windows_amd64.exe -OutFile ec.exe
+
+      # 🔍 Validar imagen (🔥 clave)
+      - name: Validate image
+        run: |
+          .\ec.exe validate image --image ${{ steps.digest.outputs.digest }}
+
+      - name: Configure oc from CRC
+        run: |
+          crc oc-env | Out-String | Invoke-Expression
+          oc version --client
+
+      - name: Login to OpenShift
+        run: |
+          crc oc-env | Out-String | Invoke-Expression
+          oc login ${{ secrets.OPENSHIFT_API_URL }} --token=${{ secrets.OPENSHIFT_TOKEN }} --insecure-skip-tls-verify=true
+          oc project ${{ secrets.OPENSHIFT_NAMESPACE }}
+
+      - name: Deploy image to OpenShift
+        run: |
+          crc oc-env | Out-String | Invoke-Expression
+          oc apply -f k8s/service.yaml -n ${{ secrets.OPENSHIFT_NAMESPACE }}
+          oc apply -f k8s/deployment.yaml -n ${{ secrets.OPENSHIFT_NAMESPACE }}
+          oc set image deployment/demo-app demo-app=${{ steps.digest.outputs.digest }} -n ${{ secrets.OPENSHIFT_NAMESPACE }}
+          oc rollout status deployment/demo-app -n ${{ secrets.OPENSHIFT_NAMESPACE }} --timeout=180s

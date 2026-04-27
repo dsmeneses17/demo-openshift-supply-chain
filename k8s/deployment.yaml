@@ -12,8 +12,10 @@ spec:
       labels:
         app: demo-app
     spec:
+      imagePullSecrets:
+        - name: ghcr-secret
       containers:
         - name: demo-app
-          image: IMAGE_PLACEHOLDER
+          image: ghcr.io/dsmeneses17/demo-openshift@sha256:80661858143783b536d3681396d93b1761ba1da852301131cc26ecec85a3e5a8
           ports:
             - containerPort: 8080
