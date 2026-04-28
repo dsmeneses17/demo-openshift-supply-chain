@@ -32,11 +32,14 @@ jobs:
           Get-ChildItem Env: | Where-Object { $_.Name -match 'HTTP|HTTPS|NO_PROXY|http_proxy|https_proxy' } | Format-Table -AutoSize
           Write-Host "===== Runner debug end ====="
 
-
+      - name: Check connectivity
+        run: |
+          Test-NetConnection -ComputerName ghcr.io -Port 443
+          
       - name: Login to GHCR
-        run: echo "${{ secrets.GHCR_PAT }}" | docker login ghcr.io -u ${{ secrets.GHCR_USERNAME }} --password-stdin
-
-
+        run: |
+          docker login ghcr.io -u ${{ secrets.GHCR_USERNAME }} -p "${{ secrets.GHCR_PAT }}"
+          
       - name: Build image
         run: docker build -t ghcr.io/${{ github.repository }}:latest ./app
 
