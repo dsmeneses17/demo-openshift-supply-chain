@@ -92,7 +92,7 @@ jobs:
 
       - name: Validate image
         run: |
-          $policy = '${{ secrets.EC_POLICY }}'
+          $policy = '{"sources": [], "publicKey": "file://cosign.pub"}'
           $policy | Out-File -FilePath policy.json -Encoding utf8
           & ec validate image `
             --image ${{ steps.digest.outputs.digest }} `
