@@ -76,7 +76,12 @@ jobs:
             }
           }
 
-          $provenance | ConvertTo-Json -Depth 8 | Out-File -FilePath provenance.json -Encoding utf8
+          $provenanceJson = $provenance | ConvertTo-Json -Depth 8
+          [System.IO.File]::WriteAllText(
+            "provenance.json",
+            $provenanceJson,
+            [System.Text.UTF8Encoding]::new($false)
+          )
 
           "digest=$fullDigest" >> $env:GITHUB_OUTPUT
           "sha=$sha" >> $env:GITHUB_OUTPUT
