@@ -20,11 +20,16 @@ jobs:
         run: |
           Write-Host "===== Runner debug start ====="
           Write-Host "User:"; whoami
-          Write-Host "Resolve DNS:"; Resolve-DnsName ghcr.io -ErrorAction SilentlyContinue || nslookup ghcr.io
-          Write-Host "Test TCP 443:"; Test-NetConnection -ComputerName ghcr.io -Port 443 -InformationLevel Detailed
-          Write-Host "Docker version:"; docker version --format '{{.Server.Version}}' 2>$null || docker version
-          Write-Host "Docker info:"; docker info --format '{{json .}}' 2>$null || docker info
-          Write-Host "Proxy envs:"; Get-ChildItem Env: | Where-Object { $_.Name -match 'HTTP|HTTPS|NO_PROXY|http_proxy|https_proxy' } | Format-Table -AutoSize
+          Write-Host "Resolve DNS for ghcr.io:"
+          Resolve-DnsName ghcr.io -ErrorAction SilentlyContinue
+          Write-Host "Test TCP 443 to ghcr.io:"
+          Test-NetConnection -ComputerName ghcr.io -Port 443 -InformationLevel Detailed
+          Write-Host "Docker version:"
+          docker version
+          Write-Host "Docker info:"
+          docker info
+          Write-Host "Proxy environment variables:"
+          Get-ChildItem Env: | Where-Object { $_.Name -match 'HTTP|HTTPS|NO_PROXY|http_proxy|https_proxy' } | Format-Table -AutoSize
           Write-Host "===== Runner debug end ====="
 
 
