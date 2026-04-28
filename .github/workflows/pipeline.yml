@@ -56,7 +56,7 @@ jobs:
             }
           }
 
-          $provenanceJson = $provenance | ConvertTo-Json -Depth 8
+          $provenanceJson = $provenance | ConvertTo-Json -Depth 10
           [System.IO.File]::WriteAllText(
             "provenance.json",
             $provenanceJson,
