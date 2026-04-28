@@ -32,43 +32,37 @@ jobs:
           $digest = docker inspect --format='{{index .RepoDigests 0}}' ghcr.io/${{ github.repository }}:latest
           "digest=$digest" >> $env:GITHUB_OUTPUT
 
-      - name: Sign image
-        run: cosign sign --yes ${{ steps.digest.outputs.digest }}
-        
-      - name: Generate provenance
-        id: provenance
+      - name: Sign and attest all digests
         run: |
-          $fullDigest = "${{ steps.digest.outputs.digest }}"
-          $sha = ($fullDigest -split "@sha256:")[1]
-
-          $provenance = @{
-            _type = "https://in-toto.io/Statement/v0.1"
-            predicateType = "https://slsa.dev/provenance/v0.2"
-            subject = @(
-              @{
-                name = "ghcr.io/${{ github.repository }}:latest"
-                digest = @{ sha256 = $sha }
+          $repo = "ghcr.io/${{ github.repository }}:latest"
+          $repoDigests = docker inspect --format='{{range .RepoDigests}}{{println .}}{{end}}' $repo
+          $repoDigests | Out-File -FilePath repo-digests.txt -Encoding utf8
+          $repoDigests = Get-Content repo-digests.txt
+          foreach ($fullDigest in $repoDigests) {
+            $imageRef = $fullDigest.Trim()
+            if ($imageRef -eq '') { continue }
+            Write-Host "Signing $imageRef"
+            cosign sign --yes $imageRef
+            $sha = ($imageRef -split "@sha256:")[1]
+            $provenance = @{
+              _type = "https://in-toto.io/Statement/v0.1"
+              predicateType = "https://slsa.dev/provenance/v0.2"
+              subject = @(
+                @{
+                  name = "ghcr.io/${{ github.repository }}:latest"
+                  digest = @{ sha256 = $sha }
+                }
+              )
+              predicate = @{
+                buildType = "github-actions"
+                builder = @{ id = "${{ github.actor }}" }
               }
-            )
-            predicate = @{
-              buildType = "github-actions"
-              builder = @{ id = "${{ github.actor }}" }
             }
+            $provenanceJson = $provenance | ConvertTo-Json -Depth 10
+            [System.IO.File]::WriteAllText("provenance.json", $provenanceJson, [System.Text.UTF8Encoding]::new($false))
+            Write-Host "Attesting $imageRef"
+            cosign attest --predicate provenance.json --type slsaprovenance $imageRef
           }
-
-          $provenanceJson = $provenance | ConvertTo-Json -Depth 10
-          [System.IO.File]::WriteAllText(
-            "provenance.json",
-            $provenanceJson,
-            [System.Text.UTF8Encoding]::new($false)
-          )
-
-          "digest=$fullDigest" >> $env:GITHUB_OUTPUT
-          "sha=$sha" >> $env:GITHUB_OUTPUT
-
-      - name: Attest image
-        run: |
-          cosign attest --predicate provenance.json --type slsaprovenance ${{ steps.digest.outputs.digest }}
 
       - name: Validate image
         run: |
