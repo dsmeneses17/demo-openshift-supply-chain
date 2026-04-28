@@ -39,10 +39,9 @@ jobs:
       - name: Login to GHCR
         run: |
           docker login ghcr.io -u ${{ secrets.GHCR_USERNAME }} -p "${{ secrets.GHCR_PAT }}"
-          
+
       - name: Build image
         run: docker build -t ghcr.io/${{ github.repository }}:latest ./app
-
 
       - name: Push image
         run: docker push ghcr.io/${{ github.repository }}:latest
@@ -52,9 +51,6 @@ jobs:
         run: |
           $digest = docker inspect --format='{{index .RepoDigests 0}}' ghcr.io/${{ github.repository }}:latest
           "digest=$digest" >> $env:GITHUB_OUTPUT
-
-      - name: Install cosign
-        uses: sigstore/cosign-installer@v3
 
       - name: Sign image
         run: cosign sign --yes ${{ steps.digest.outputs.digest }}
@@ -89,13 +85,9 @@ jobs:
         run: |
           cosign attest --predicate provenance.json --type slsaprovenance ${{ steps.digest.outputs.digest }}
 
-      - name: Install ec
-        run: |
-          Invoke-WebRequest -Uri https://github.com/enterprise-contract/ec-cli/releases/latest/download/ec_windows_amd64.exe -OutFile ec.exe
-
       - name: Validate image
         run: |
-          .\ec.exe validate image --image ${{ steps.digest.outputs.digest }}
+          ec validate image --image ${{ steps.digest.outputs.digest }}
 
       - name: Configure oc from CRC
         run: |
