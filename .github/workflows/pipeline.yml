@@ -92,12 +92,14 @@ jobs:
 
       - name: Validate image
         run: |
+          $policy = '${{ secrets.EC_POLICY }}'
+          $policy | Out-File -FilePath policy.json -Encoding utf8
           & ec validate image `
             --image ${{ steps.digest.outputs.digest }} `
             --certificate-identity "https://github.com/${{ github.repository }}/.github/workflows/${{ github.workflow }}@refs/heads/main" `
             --certificate-oidc-issuer "https://token.actions.githubusercontent.com" `
             --rekor-url "https://rekor.sigstore.dev" `
-            --policy ${{ secrets.EC_POLICY }}
+            --policy policy.json
 
       - name: Configure oc from CRC
         run: |
