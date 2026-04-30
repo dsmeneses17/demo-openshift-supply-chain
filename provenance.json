@@ -1,0 +1,18 @@
+{
+    "predicateType": "https://slsa.dev/provenance/v0.2",
+    "_type": "https://in-toto.io/Statement/v0.1",
+    "predicate": {
+        "builder": {
+            "id": "dsmeneses17"
+        },
+        "buildType": "github-actions"
+    },
+    "subject": [
+        {
+            "digest": {
+                "sha256": "5e15a8209575c70f284d4d23c1fcd99d44f691c865928f29ac63b3cbba3dbde1"
+            },
+            "name": "ghcr.io/dsmeneses17/demo-openshift-supply-chain:latest"
+        }
+    ]
+}

@@ -26,50 +26,82 @@ jobs:
       - name: Push image
         run: docker push ghcr.io/${{ github.repository }}:latest
 
-      - name: Get digest
-        id: digest
-        run: |
-          $digest = docker inspect --format='{{index .RepoDigests 0}}' ghcr.io/${{ github.repository }}:latest
-          "digest=$digest" >> $env:GITHUB_OUTPUT
-
-      - name: Sign and attest all digests
+      - name: Get all digests
+        id: digests
         run: |
           $repo = "ghcr.io/${{ github.repository }}:latest"
-          $repoDigests = docker inspect --format='{{range .RepoDigests}}{{println .}}{{end}}' $repo
-          $repoDigests | Out-File -FilePath repo-digests.txt -Encoding utf8
-          $repoDigests = Get-Content repo-digests.txt
-          foreach ($fullDigest in $repoDigests) {
-            $imageRef = $fullDigest.Trim()
-            if ($imageRef -eq '') { continue }
-            Write-Host "Signing $imageRef"
-            cosign sign --yes $imageRef
-            $sha = ($imageRef -split "@sha256:")[1]
-            $provenance = @{
-              _type = "https://in-toto.io/Statement/v0.1"
-              predicateType = "https://slsa.dev/provenance/v0.2"
-              subject = @(
-                @{
-                  name = "ghcr.io/${{ github.repository }}:latest"
-                  digest = @{ sha256 = $sha }
-                }
-              )
-              predicate = @{
-                buildType = "github-actions"
-                builder = @{ id = "${{ github.actor }}" }
+          $mainDigest = (docker inspect --format='{{index .RepoDigests 0}}' $repo).Trim()
+          $digests = @($mainDigest)
+          
+          $env:DOCKER_CLI_EXPERIMENTAL = "enabled"
+          $manifestJson = docker manifest inspect $repo | Out-String | ConvertFrom-Json -ErrorAction SilentlyContinue
+          
+          if ($null -ne $manifestJson -and $null -ne $manifestJson.manifests) {
+              $baseRepo = ($repo -split ":")[0].Split("@")[0]
+              foreach ($m in $manifestJson.manifests) {
+                  if ($m.digest) {
+                      $fullRef = "$baseRepo@$($m.digest)"
+                      if ($digests -notcontains $fullRef) {
+                          $digests += $fullRef
+                      }
+                  }
               }
+          }
+          
+          $digestsList = $digests -join ','
+          "main_digest=$mainDigest" >> $env:GITHUB_OUTPUT
+          "all_digests=$digestsList" >> $env:GITHUB_OUTPUT
+          Write-Host "Main Digest: $mainDigest"
+          Write-Host "All Digests: $digestsList"
+
+      - name: Generate provenance
+        run: |
+          $provenance = @{
+            builder = @{ id = "https://github.com/${{ github.repository }}" }
+            buildType = "github-actions"
+            invocation = @{}
+            buildConfig = @{}
+            metadata = @{
+              completeness = @{
+                parameters = $false
+                environment = $false
+                materials = $false
+              }
+              reproducible = $false
             }
-            $provenanceJson = $provenance | ConvertTo-Json -Depth 10
-            [System.IO.File]::WriteAllText("provenance.json", $provenanceJson, [System.Text.UTF8Encoding]::new($false))
-            Write-Host "Attesting $imageRef"
-            cosign attest --predicate provenance.json --type slsaprovenance $imageRef
+            materials = @()
+          }
+          
+          $provenanceJson = $provenance | ConvertTo-Json -Depth 10
+          [System.IO.File]::WriteAllText(
+            "provenance.json",
+            $provenanceJson,
+            [System.Text.UTF8Encoding]::new($false)
+          )
+
+      - name: Sign and Attest all components
+        run: |
+          $digests = "${{ steps.digests.outputs.all_digests }}" -split ","
+          foreach ($ref in $digests) {
+              Write-Host "========================================="
+              Write-Host "Firmando y atestando: $ref"
+              Write-Host "========================================="
+              
+              cosign sign --yes $ref
+              if ($LASTEXITCODE -ne 0) { Write-Error "Failed to sign $ref"; exit 1 }
+              
+              cosign attest --yes --predicate provenance.json --type slsaprovenance $ref
+              if ($LASTEXITCODE -ne 0) { Write-Error "Failed to attest $ref"; exit 1 }
           }
 
       - name: Validate image
         run: |
+          $mainDigest = "${{ steps.digests.outputs.main_digest }}"
           $policy = '{"sources": [], "publicKey": "file://cosign.pub"}'
           $policy | Out-File -FilePath policy.json -Encoding utf8
+          
           & ec validate image `
-            --image ${{ steps.digest.outputs.digest }} `
+            --image $mainDigest `
             --certificate-identity-regexp "^https://github\.com/${{ github.repository }}/.github/workflows/.*@refs/heads/main$" `
             --certificate-oidc-issuer-regexp "token\.actions\.githubusercontent\.com" `
             --rekor-url "https://rekor.sigstore.dev" `
@@ -91,5 +123,5 @@ jobs:
           crc oc-env | Out-String | Invoke-Expression
           oc apply -f k8s/service.yaml -n ${{ secrets.OPENSHIFT_NAMESPACE }}
           oc apply -f k8s/deployment.yaml -n ${{ secrets.OPENSHIFT_NAMESPACE }}
-          oc set image deployment/demo-app demo-app=${{ steps.digest.outputs.digest }} -n ${{ secrets.OPENSHIFT_NAMESPACE }}
+          oc set image deployment/demo-app demo-app=${{ steps.digests.outputs.main_digest }} -n ${{ secrets.OPENSHIFT_NAMESPACE }}
           oc rollout status deployment/demo-app -n ${{ secrets.OPENSHIFT_NAMESPACE }} --timeout=180s
